@@ -1,11 +1,11 @@
 package ru.otus.homework.service;
 
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import ru.otus.homework.model.Post;
 
-import java.util.List;
-
 public interface PostService {
-    List<Post> insertPostByBook(String bookId, String description);
-    boolean deletePostsByBook(String bookId);
-    List<Post> getPostsByBook(String bookId);
+    Flux<Post> insertPostByBook(String bookId, String description);
+    Mono<Void> deletePostsByBook(String bookId);
+    Flux<Post> getPostsByBook(String bookId);
 }

@@ -2,17 +2,20 @@ package ru.otus.homework.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import ru.otus.homework.controller.dto.BookDto;
 import ru.otus.homework.model.Author;
 import ru.otus.homework.model.Book;
-import ru.otus.homework.model.Genre;
+import ru.otus.homework.repository.AuthorRepository;
 import ru.otus.homework.repository.BookRepository;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
+import java.util.Objects;
 
-@Service
+@Service("bookInfoServiceImpl")
 @Slf4j
 public class BookInfoServiceImpl implements BookInfoService {
     private static final String ERROR_ON_UPDATING_BOOK = "error on updating book";
@@ -20,88 +23,80 @@ public class BookInfoServiceImpl implements BookInfoService {
     private static final String ERROR_ON_DELETING_BOOK = "error on deleting book";
 
     private final BookRepository bookRepository;
+    private final AuthorRepository authorRepository;
 
-    public BookInfoServiceImpl(
-            BookRepository bookRepository
-    ) {
+    public BookInfoServiceImpl(BookRepository bookRepository, AuthorRepository authorRepository) {
         this.bookRepository = bookRepository;
+        this.authorRepository = authorRepository;
     }
 
     @Override
-    public Book insertBook(String title, String authors, String genre, String description) {
-        List<Author> authorList = formAuthorList(authors);
-        try {
-            Book newBook = new Book(null, title, Genre.valueOf(genre), authorList, description, null);
-            return bookRepository.save(newBook);
-        } catch (Exception e) {
-            log.error(ERROR_ON_INSERTING_BOOK, e);
-        }
-        return null;
+    public Mono<Book> getBookById(String bookId) {
+        return bookRepository.findById(bookId);
     }
 
     @Override
-    public Book insertBook(Book book) {
-        if (book != null) {
-            try {
-                return bookRepository.save(book);
-            } catch (Exception e) {
-                log.error(ERROR_ON_INSERTING_BOOK, e);
-            }
-        }
-
-        return null;
+    public Mono<Book> insertBook(final BookDto bookDto) {
+        final Book book = Book.builder()
+                .fullName(bookDto.getFullname())
+                .genre(bookDto.getGenre())
+                .description(bookDto.getDescription())
+                .build();
+        return Flux.fromStream(formAuthorList(bookDto.getAuthors()).stream())
+                .flatMap(this::buildAuthor)
+                .map(Author::getId)
+                .collectList()
+                .flatMap(
+                        authorIds -> {
+                            book.setAuthorsIds(authorIds);
+                            return bookRepository.save(book);
+                        }
+                )
+                .doOnError(error -> log.error(ERROR_ON_INSERTING_BOOK, error));
     }
 
     @Override
-    public Book updateTitleBookById(String bookId, String newBookTitle) {
-        Book updatedBook = getBookById(bookId);
-        if (updatedBook != null) {
-            updatedBook.setFullName(newBookTitle);
-            return updateBook(updatedBook);
-        }
-        return null;
+    public Mono<Book> insertBook(final Book book) {
+        return bookRepository.save(book);
     }
 
     @Override
-    public boolean deleteBookById(String bookId) {
-        try {
-            Book book = getBookById(bookId);
-            if (book != null) {
-                bookRepository.delete(book);
-                return true;
-            }
-        } catch (Exception e) {
-            log.error(ERROR_ON_DELETING_BOOK, e);
-        }
-        return false;
+    public Mono<Book> updateTitleBookById(String bookId, String newBookTitle) {
+        return getBookById(bookId).switchIfEmpty(Mono.empty())
+                .filter(Objects::nonNull)
+                .flatMap(
+                        book -> {
+                            book.setFullName(newBookTitle);
+                            return bookRepository.save(book);
+                        }
+                )
+                .doOnError(error -> log.error(ERROR_ON_UPDATING_BOOK, error));
     }
 
     @Override
-    public List<Book> getAllBooks() {
-        return bookRepository.findAll();
+    public Mono<Void> deleteBookById(String bookId) {
+        return getBookById(bookId).switchIfEmpty(Mono.empty())
+                .filter(Objects::nonNull)
+                .flatMap(bookRepository::delete)
+                .doOnError(error -> log.error(ERROR_ON_DELETING_BOOK, error));
     }
 
     @Override
-    public Book getBookById(String bookId) {
-        Optional<Book> optionalBook = bookRepository.findById(bookId);
-        return optionalBook.orElse(null);
+    public Flux<Book> getAllBooks() {
+        return bookRepository.findAll().switchIfEmpty(Flux.empty());
     }
 
     private List<Author> formAuthorList(String authorFullNames) {
         List<Author> userAuthorList = new ArrayList<>();
         if (authorFullNames != null) {
             Arrays.stream(authorFullNames.split(";"))
-                    .forEach(fullName -> userAuthorList.add(new Author(null, fullName, null)));
+                    .forEach(fullName -> userAuthorList.add(new Author(null, fullName)));
         }
         return userAuthorList;
     }
 
-    private Book updateBook(Book book) {
-        try {
-            return bookRepository.save(book);
-        } catch (Exception e) {
-            log.error(ERROR_ON_UPDATING_BOOK, e);
-        }
-        return null;
+    private Mono<Author> buildAuthor(Author author) {
+        return authorRepository.findFirstByFullName(author.getFullName())
+                .switchIfEmpty(authorRepository.save(author));
     }
 }
