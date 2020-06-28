@@ -1,8 +1,0 @@
-spring:
-  data:
-    mongodb:
-      port: 22222
-      database: test
-logging:
-  level:
-    root: ERROR
